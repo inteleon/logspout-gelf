@@ -21,8 +21,9 @@ func init() {
 
 // GelfAdapter is an adapter that streams UDP JSON to Graylog
 type GelfAdapter struct {
-	writer *gelf.Writer
-	route  *router.Route
+	writer            *gelf.Writer
+	route             *router.Route
+	writerInitialized time.Time
 }
 
 // NewGelfAdapter creates a GelfAdapter with UDP as the default transport.
@@ -37,15 +38,28 @@ func NewGelfAdapter(route *router.Route) (router.LogAdapter, error) {
 		return nil, err
 	}
 
-	return &GelfAdapter{
-		route:  route,
-		writer: gelfWriter,
-	}, nil
+	gelfAdapter := &GelfAdapter{
+		route:             route,
+		writer:            gelfWriter,
+		writerInitialized: time.Now(),
+	}
+
+	return gelfAdapter, nil
 }
 
 // Stream implements the router.LogAdapter interface.
 func (a *GelfAdapter) Stream(logstream chan *router.Message) {
 	for message := range logstream {
+		if time.Now().Unix() >= a.writerInitialized.Unix()+30 {
+			newWriter, err := gelf.NewWriter(a.route.Address)
+			if err != nil {
+				log.Println("Graylog:", err)
+				continue
+			}
+			a.writer = newWriter
+			a.writerInitialized = time.Now()
+		}
+
 		m := &GelfMessage{message}
 		level := gelf.LOG_INFO
 		if m.Source == "stderr" {
